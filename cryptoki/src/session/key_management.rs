@@ -73,24 +73,49 @@ impl Session {
         &self,
         mechanism: &Mechanism,
         base_key: ObjectHandle,
-        template: &[Attribute],
+        template: Option<&[Attribute]>,
     ) -> Result<ObjectHandle> {
         let mut mechanism: CK_MECHANISM = mechanism.into();
-        let mut template: Vec<CK_ATTRIBUTE> = template.iter().map(|attr| attr.into()).collect();
-        let mut handle = 0;
-        unsafe {
-            Rv::from(get_pkcs11!(self.client(), C_DeriveKey)(
-                self.handle(),
-                &mut mechanism as CK_MECHANISM_PTR,
-                base_key.handle(),
-                template.as_mut_ptr(),
-                template.len().try_into()?,
-                &mut handle,
-            ))
-            .into_result(Function::DeriveKey)?;
-        }
+        let template = template.map(|template| {
+            template
+                .iter()
+                .map(|attr| attr.into())
+                .collect::<Vec<CK_ATTRIBUTE>>()
+        });
 
-        Ok(ObjectHandle::new(handle))
+        match template {
+            Some(template) => {
+                let mut template = template;
+                let mut handle = 0;
+
+                unsafe {
+                    Rv::from(get_pkcs11!(self.client(), C_DeriveKey)(
+                        self.handle(),
+                        &mut mechanism as CK_MECHANISM_PTR,
+                        base_key.handle(),
+                        template.as_mut_ptr(),
+                        template.len().try_into()?,
+                        &mut handle,
+                    ))
+                    .into_result(Function::DeriveKey)?;
+                }
+
+                Ok(ObjectHandle::new(handle))
+            }
+            None => unsafe {
+                Rv::from(get_pkcs11!(self.client(), C_DeriveKey)(
+                    self.handle(),
+                    &mut mechanism as CK_MECHANISM_PTR,
+                    base_key.handle(),
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                ))
+                .into_result(Function::DeriveKey)?;
+
+                Ok(ObjectHandle::new(0))
+            },
+        }
     }
 
     /// Wrap key
